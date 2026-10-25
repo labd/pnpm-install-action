@@ -1,0 +1,116 @@
+name: Test
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matrix:
+    name: ${{ matrix.os }} / node ${{ matrix.node-version }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node-version: ["22", "24", "26"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run action
+        id: install
+        uses: ./
+        with:
+          cwd: test/fixture
+          node-version: ${{ matrix.node-version }}
+
+      - name: Verify
+        shell: bash
+        working-directory: test/fixture
+        env:
+          EXPECTED_NODE: ${{ matrix.node-version }}
+          OUT_NODE_VERSION: ${{ steps.install.outputs.node-version }}
+          OUT_STORE_PATH: ${{ steps.install.outputs.pnpm-store-path }}
+          OUT_CACHE_HIT: ${{ steps.install.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          echo "node-version=$OUT_NODE_VERSION pnpm-store-path=$OUT_STORE_PATH cache-hit=$OUT_CACHE_HIT"
+          node --version | grep -q "^v${EXPECTED_NODE}\."
+          case "$OUT_NODE_VERSION" in v"$EXPECTED_NODE".*) ;; *) echo "unexpected node-version output"; exit 1 ;; esac
+          [ "$(pnpm --version)" = "12.15.0" ]
+          [ -n "$OUT_STORE_PATH" ]
+          [ -n "$OUT_CACHE_HIT" ]
+          test -f node_modules/is-number/package.json
+
+  no-cache:
+    name: cache false, frozen-lockfile false, .nvmrc
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run action
+        id: install
+        uses: ./
+        with:
+          cwd: test/fixture
+          cache: "false"
+          frozen-lockfile: "false"
+
+      - name: Verify
+        shell: bash
+        working-directory: test/fixture
+        env:
+          OUT_CACHE_HIT: ${{ steps.install.outputs.cache-hit }}
+        run: |
+          set -euo pipefail
+          # Node version comes from test/fixture/.nvmrc
+          node --version | grep -q '^v22\.'
+          [ -z "$OUT_CACHE_HIT" ]
+          test -f node_modules/is-number/package.json
+
+  explicit-pnpm:
+    name: pnpm-version input, registry-url, default node
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run action
+        uses: ./
+        with:
+          cwd: test/fixture-no-package-manager
+          pnpm-version: "10"
+          cache: "false"
+          audit: "false"
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify
+        shell: bash
+        working-directory: test/fixture-no-package-manager
+        run: |
+          set -euo pipefail
+          # No .nvmrc / .node-version here, so the default (24) is used
+          node --version | grep -q '^v24\.'
+          pnpm --version | grep -q '^10\.'
+          grep -q 'registry.npmjs.org' "$NPM_CONFIG_USERCONFIG"
+          test -f node_modules/is-number/package.json

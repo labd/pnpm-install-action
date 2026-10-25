@@ -1,0 +1,9 @@
+{
+  "name": "pnpm-install-action-fixture",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@12.15.0",
+  "dependencies": {
+    "is-number": "7.0.0"
+  }
+}
